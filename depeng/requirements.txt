@@ -1,0 +1,10 @@
+chromadb
+hf-xet
+langchain
+langchain-community
+langchain-core
+langchain-huggingface
+langchain-text-splitters
+torch
+openai
+sentence-transformers
