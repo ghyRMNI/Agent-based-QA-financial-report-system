@@ -121,6 +121,7 @@ template = (
 
 # 2. 构造 PromptTemplate
 # 这是 ReAct Agent 期望的 PromptTemplate 类型
+
 prompt = PromptTemplate.from_template(template)
 # base_prompt = hub.pull("hwchase17/react-chat")
 # prompt = ChatPromptTemplate.from_messages([
@@ -133,6 +134,7 @@ prompt = PromptTemplate.from_template(template)
 #     # 4. Agent 历史思考过程 (修复 TypeError 的关键)
 #     MessagesPlaceholder(variable_name="agent_scratchpad"),
 # ])
+
 
 # 2. 创建 Agent
 agent = create_react_agent(

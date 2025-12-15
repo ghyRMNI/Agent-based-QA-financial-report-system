@@ -1,4 +1,5 @@
 import os
+import json
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -16,6 +17,8 @@ from langchain.tools import BaseTool
 from langchain.agents.openai_functions_agent.base import create_openai_functions_agent
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 
+from main_pipeline import UnifiedDataCollector
+
 
 
 class FinancialDataParams(BaseModel):
@@ -23,8 +26,8 @@ class FinancialDataParams(BaseModel):
     用于从用户的自然语言请求中，严格提取出收集财报数据所需的参数。
     """
     stock_code: str = Field(description="股票代码，例如 '00700', '600519' 等。")
-    start_year: int = Field(description="需要获取的财报起始年份，例如 2023。")
-    end_year: int = Field(description="需要获取的财报结束年份，例如2025")
+    start_date: int = Field(description="需要获取的财报起始年份，例如 2023。")
+    end_date: int = Field(description="需要获取的财报结束年份，例如2025")
 
     @field_validator("stock_code")
     def validate_stock_code(cls, value):
@@ -32,7 +35,7 @@ class FinancialDataParams(BaseModel):
             raise ValueError(f"股票代码 '{value}' 格式不正确，需要是6位数字")
         return value
 
-    @field_validator("start_year", "end_year")
+    @field_validator("start_date", "end_date")
     def validate_year(cls, value):
         current_year = datetime.now().year
         # 如果用户输入年份大于当前年份或小于1990年，则报错
@@ -50,16 +53,16 @@ class CollectFinancialDataTool(BaseTool):
     name: str = "collect_financial_data_pipeline"
     description: str = (
         "当用户明确请求获取某公司（提供股票代码）的特定年份（例如 2023 年）的财报数据时，"
-        "必须调用此工具，并严格填充 stock_code 和 start_year 和 end_year 字段。"
-        "如果用户只给出一个年份，请将 start_year 和 end_year 的值设为相同"
+        "必须调用此工具，并严格填充 stock_code 和 start_date 和 end_date 字段。"
+        "如果用户只给出一个年份，请将 start_date 和 end_date 的值设为相同"
         ""
     )
     args_schema: type[BaseModel] = FinancialDataParams # Tool 的输入 Schema 即 Pydantic 模型
 
-    def _run(self, stock_code: str, start_year: int, end_year: int):
+    def _run(self, stock_code: str, start_date: int, end_date: int):
         """Tool 的实际执行逻辑，Agent 决定调用它时会运行这里。"""
         # 在这里我们不执行爬取，而是返回一个 JSON 格式的确认信息
-        return f"已成功提取参数并确认：股票代码='{stock_code}', 起始年份='{start_year}', 结束年份='{end_year}'。准备执行数据收集..."
+        return f"已成功提取参数并确认：股票代码='{stock_code}', 起始年份='{start_date}', 结束年份='{end_date}'。准备执行数据收集..."
 
     def _arun(self, *args, **kwargs):
         raise NotImplementedError("Async run not implemented")
@@ -74,23 +77,22 @@ class ExecuteFinancialDataTool(BaseTool):
     name: str = "execute_financial_data_collection"
     description: str = (
         "只有当用户明确回复 '确认', '是的', '继续' 等表示同意的词语后，"
-        "且 Agent 已经从对话历史中获得了 'stock_code', 'start_year', 'end_year' 三个参数时，"
+        "且 Agent 已经从对话历史中获得了 'stock_code', 'start_date', 'end_date' 三个参数时，"
         "必须调用此工具来执行数据收集的最终操作。"
     )
     args_schema: type[BaseModel] = FinancialDataParams
 
-    def _run(self, stock_code: str, start_year: int, end_year: int):
+    def _run(self, stock_code: str, start_date: int, end_date: int):
         """Tool 的实际执行逻辑，即您之前放在循环中的 `execute_data_collection` 函数。"""
         # 🌟 实际执行逻辑在这里！
 
-        # 模拟执行（您可以替换成您的爬虫或API调用）
-        output = (
-            f"✅ 数据收集任务已启动！\n"
-            f"股票代码：{stock_code}\n"
-            f"年份范围：{start_year} 至 {end_year}\n"
-            f"请稍候查看结果。"
-        )
+        output = {
+            "stock_code": stock_code,
+            "start_date": start_date,
+            "end_date": end_date,
+        }
         return output
+
 
     def _arun(self, *args, **kwargs):
         raise NotImplementedError("Async run not implemented")
@@ -105,10 +107,11 @@ system_prompt = (
     "你的任务是接收用户的请求，并进行以下判断："
     "1. **如果**用户的请求是闲聊或不涉及数据收集，请以自然语言回复。"
     "2. **如果**你需要调用工具，你**必须**使用 collect_financial_data_pipeline 工具，"
-    "   并且**严格使用**以下 JSON 键名来填充参数：'stock_code', 'start_year', 'end_year'。"
+    "   并且**严格使用**以下 JSON 键名来填充参数：'stock_code', 'start_date', 'end_date'，并放入parameters参数中"
     "   并等待用户回复 '确认' 或 '否认'。"
     "3. **执行阶段**："
     "   - **如果用户回复 '确认' 或同意的词语**，你必须立即使用对话历史中已有的参数，调用 `execute_financial_data_collection` 工具来执行最终任务。"
+    "   - **绝对禁止在没有调用 `execute_financial_data_collection` 工具并获得结果之前，臆造或生成任何形式的『执行报告』或『数据抓取已启动』的自然语言回复。你必须通过工具调用来完成这一步骤。**"
     "   - **如果用户回复 '否认' 或拒绝的词语**，你必须回复自然语言，要求用户重新输入完整准确的信息。"
     "4. **在调用工具之前，请勿以自然语言形式回复收集财报数据相关的问题。**"
     "\n\n请严格遵循工具调用格式，确保JSON键名和工具名称的准确性。"
@@ -193,24 +196,48 @@ def run_chat_agent():
             # --- 步骤 1 检查: 是否是 Tool 1 返回的参数 JSON? ---
             # 检查 Agent 的输出是否是 Tool Call 返回的 JSON 字符串 (通常 Agent 会返回 Tool 的结果)
             if agent_output.strip().startswith('{') and any(
-                    key in agent_output for key in ["stock_code", "start_year"]):
-                import json
+                    key in agent_output for key in ["stock_code", "start_date"]):
                 try:
                     data = json.loads(agent_output)
 
-                    # 捕获待确认数据 (虽然这里仅用于格式化，但保留状态变量能防止 Agent 意外回复)
-                    pending_confirmation_data = data
+                    if data['tool'] == "collect_financial_data_pipeline":
+                        # 捕获待确认数据
+                        pending_confirmation_data = data
 
-                    # 🌟 主循环构造固定格式的回复
-                    formatted_json = json.dumps(data, indent=2, ensure_ascii=False)
-                    ai_response = (
-                        "我已成功提取您请求的参数，请确认：\n"
-                        f"{formatted_json}\n"
-                        "请回复 **'确认'** 或 **'否认'**。"
-                    )
+                        # 构造固定格式的回复
+                        formatted_json = json.dumps(data, indent=2, ensure_ascii=False)
+                        ai_response = (
+                            "我已成功提取您请求的参数，请确认：\n"
+                            f"{formatted_json}\n"
+                            "请回复 **'确认'** 或 **'否认'**。"
+                        )
 
+                    elif data['tool'] == "execute_financial_data_collection":
+                        pending_confirmation_data = data
+                        data = data["parameters"]
+                        data["stock_code"] = data["stock_code"].split(".")[0]
+                        data["exchange_type"] = None
+                        data["company_name"] = data["stock_code"]
+                        print(data)
+                        collector = UnifiedDataCollector(
+                            company_name=data["stock_code"],
+                            stock_code=data["stock_code"],
+                            start_date=data["start_date"],
+                            end_date=data["end_date"],
+                            exchange_type=data["exchange_type"],
+                        )
+                        collector.run_all()
+
+                        ai_response = (
+                            "已按以下信息爬取财报数据：\n"
+                            f"{data}\n"
+                            "现在请询问任何关于此公司的信息"
+                        )
+
+                    else:
+                        ai_response = agent_output
                 except json.JSONDecodeError:
-                    # 不是预期的 JSON，按普通回复处理
+                    # 不是 JSON，按 Agent 的普通回复处理
                     ai_response = agent_output
 
             # --- 步骤 2 检查: Agent 内部自己处理了确认/执行或闲聊 ---

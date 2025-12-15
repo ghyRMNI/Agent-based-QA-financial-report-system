@@ -938,10 +938,10 @@ def interactive_input():
     }
 
 
-def input_checking(data: dict):
-    stock_code = data["parameters"]["stock_code"]
-    start_year = data["parameters"]["start_year"]
-    end_year = data["parameters"]["end_year"]
+# def input_checking(data: dict):
+#     stock_code = data["parameters"]["stock_code"]
+#     start_year = data["parameters"]["start_year"]
+#     end_year = data["parameters"]["end_year"]
 
 
 def data_collection():
