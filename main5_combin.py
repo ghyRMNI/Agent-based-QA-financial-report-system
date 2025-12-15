@@ -23,6 +23,7 @@ GLOBAL_LLM = None
 GLOBAL_DATA_COLLECTION_AGENT = None
 GLOBAL_ANALYSIS_AGENT = None
 GLOBAL_MEMORY = None
+ROOT_PATH = None
 
 # ============================================================================
 # Agent 1: 数据收集 Agent 相关定义
@@ -125,11 +126,14 @@ class FinancialReportAnalysisTool(BaseTool):
     )
     args_schema: type[BaseModel] = FileAnalysisParams
 
-    FIXED_REPORT_PATH: str = "./unified_outputs/002216/financial_statements.csv"
-
     def _read_file_content(self) -> str:
         """从固定的、确定的路径读取文件内容。"""
-        actual_path = self.FIXED_REPORT_PATH
+        # 动态获取最新的ROOT_PATH
+        root_path = globals().get("ROOT_PATH")
+        if root_path is None:
+            return "系统配置错误：ROOT_PATH未设置，请先执行数据收集。"
+        
+        actual_path = f"{root_path}/integrated_stock_news_data.csv"
         try:
             with open(actual_path, 'r', encoding='utf-8') as f:
                 return f.read()
@@ -212,9 +216,10 @@ class RouteToCollectionTool(BaseTool):
     """路由到数据收集agent的工具"""
     name: str = "route_to_data_collection"
     description: str = (
-        "当用户请求收集、爬取、下载财报数据，或提供股票代码和年份要求获取数据时，"
-        "必须调用此工具将请求路由到数据收集agent。"
-        "例如：'帮我收集002216公司2023年的财报'、'爬取600519的2024年数据'等。"
+        "当用户请求收集、爬取、下载财报数据，或提供股票代码、公司名称和年份要求获取数据时，"
+        "必须通过function calling调用此工具将请求路由到数据收集agent。"
+        "参数user_input应该是用户的完整原始输入。"
+        "例如：'帮我收集002216公司2023年的财报'、'爬取600519的2024年数据'、'我想爬安井食品2024年的财报'等。"
     )
     args_schema: type[BaseModel] = RouteToCollectionParams
 
@@ -239,7 +244,8 @@ class RouteToAnalysisTool(BaseTool):
     name: str = "route_to_data_analysis"
     description: str = (
         "当用户请求分析财报、询问财务数据相关问题，或对已有数据提出问题时，"
-        "必须调用此工具将请求路由到数据分析agent。"
+        "必须通过function calling调用此工具将请求路由到数据分析agent。"
+        "参数user_input应该是用户的完整原始输入。"
         "例如：'2023年营收是多少？'、'分析一下这个公司的财务状况'、'营收同比增速是多少？'等。"
     )
     args_schema: type[BaseModel] = RouteToAnalysisParams
@@ -283,7 +289,18 @@ def create_data_collection_agent(llm: ChatOpenAI, memory: ConversationBufferWind
         "   - **绝对禁止在没有调用 `execute_financial_data_collection` 工具并获得结果之前，臆造或生成任何形式的『执行报告』或『数据抓取已启动』的自然语言回复。你必须通过工具调用来完成这一步骤。**"
         "   - **如果用户回复 '否认' 或拒绝的词语**，你必须回复自然语言，要求用户重新输入完整准确的信息。"
         "4. **在调用工具之前，请勿以自然语言形式回复收集财报数据相关的问题。**"
-        "\n\n请严格遵循工具调用格式，确保JSON键名和工具名称的准确性。"
+        "\n\n"
+        "### 重要：公司名称转股票代码规则\n"
+        "**当用户提供公司名称而不是股票代码时，你必须根据你的知识自动查找并转换为对应的6位数字股票代码。**\n"
+        "常见公司名称与股票代码对应关系示例：\n"
+        "- 安井食品 → 603345\n"
+        "- 三全食品 → 002216\n"
+        "- 贵州茅台 → 600519\n"
+        "- 腾讯控股 → 00700（港股）\n"
+        "- 平安银行 → 000001\n"
+        "**如果用户只提供了公司名称，你必须自动查找对应的股票代码，不要将stock_code设为null。**\n"
+        "**只有在完全无法确定股票代码时，才将stock_code设为null。**\n"
+        "\n请严格遵循工具调用格式，确保JSON键名和工具名称的准确性。"
     )
 
     prompt = ChatPromptTemplate.from_messages([
@@ -385,53 +402,101 @@ def create_analysis_agent(llm: ChatOpenAI, memory: ConversationBufferWindowMemor
 # ============================================================================
 
 def create_router_agent(llm: ChatOpenAI, memory: ConversationBufferWindowMemory) -> AgentExecutor:
-    """创建主路由Agent Executor"""
-    router_tools: List[BaseTool] = [
-        RouteToCollectionTool(),
-        RouteToAnalysisTool()
-    ]
-
+    """创建主路由Agent Executor - 只负责判断并输出JSON，不调用工具"""
+    
     router_system_prompt = (
-        "你是一位智能路由助手，负责根据用户的意图将请求路由到合适的专业agent。\n\n"
-        "### 你的任务\n"
-        "分析用户的请求，判断应该使用哪个agent：\n"
+        "你是一位智能路由助手，负责根据用户的意图判断应该使用哪个专业agent。\n\n"
+        "### 核心任务\n"
+        "分析用户的请求和对话历史，输出一个JSON格式的决策，包含以下字段：\n"
+        "- `tool`: 字符串，值为 `\"route_to_data_collection\"` 或 `\"route_to_data_analysis\"`\n"
+        "- `user_input`: 字符串，用户的完整原始输入\n\n"
+        "### 路由规则\n"
         "1. **数据收集agent** (`route_to_data_collection`)："
         "   - 用户请求收集、爬取、下载财报数据"
-        "   - 用户提供股票代码和年份要求获取数据"
-        "   - 例如：'帮我收集002216公司2023年的财报'、'爬取600519的2024年数据'\n"
+        "   - 用户提供股票代码、公司名称和年份要求获取数据"
+        "   - **重要**：如果对话历史显示数据收集agent刚刚提取了参数并等待确认，"
+        "     且用户回复'确认'、'是的'、'继续'等表示同意的词语，"
+        "     必须输出 `{{\"tool\": \"route_to_data_collection\", \"user_input\": \"用户的输入\"}}`"
+        "   - 例如：'帮我收集002216公司2023年的财报'、'爬取600519的2024年数据'、'我想爬安井食品2024年的财报'、'确认'\n"
         "2. **数据分析agent** (`route_to_data_analysis`)："
         "   - 用户请求分析财报、询问财务数据相关问题"
         "   - 用户对已有数据提出具体问题"
         "   - 例如：'2023年营收是多少？'、'分析一下这个公司的财务状况'、'营收同比增速是多少？'\n\n"
-        "### 重要规则\n"
-        "- 你必须根据用户意图准确选择工具，不能随意选择\n"
-        "- 如果用户意图不明确，可以询问用户\n"
-        "- 如果用户只是闲聊，可以直接回复，不需要调用工具\n"
-        "- 调用工具时，必须将用户的完整原始输入传递给对应的agent\n"
+        "### 输出格式要求\n"
+        "**你必须严格按照以下JSON格式输出，不要添加任何解释性文字：**\n"
+        "```json\n"
+        "{{\n"
+        "  \"tool\": \"route_to_data_collection\",\n"
+        "  \"user_input\": \"用户的完整原始输入\"\n"
+        "}}\n"
+        "```\n"
+        "或者\n"
+        "```json\n"
+        "{{\n"
+        "  \"tool\": \"route_to_data_analysis\",\n"
+        "  \"user_input\": \"用户的完整原始输入\"\n"
+        "}}\n"
+        "```\n\n"
+        "### 严格规则\n"
+        "- **必须输出有效的JSON格式**，包含 tool 和 user_input 两个字段\n"
+        "- **禁止**在JSON前后添加任何解释性文字\n"
+        "- **禁止**用自然语言解释路由逻辑\n"
+        "- 如果用户意图完全无法判断，输出：`{{\"tool\": null, \"user_input\": \"用户的输入\"}}`，然后用自然语言询问用户\n"
+        "- 如果用户只是闲聊，直接回复自然语言，不要输出JSON\n"
+        "- `user_input` 字段必须是用户的完整原始输入，不要修改\n"
     )
 
     router_prompt = ChatPromptTemplate.from_messages([
         ("system", router_system_prompt),
         MessagesPlaceholder(variable_name="chat_history"),
         ("human", "{input}"),
-        MessagesPlaceholder(variable_name="agent_scratchpad"),
     ])
 
-    router_agent = create_openai_functions_agent(
-        llm=llm,
-        tools=router_tools,
-        prompt=router_prompt,
-    )
-
-    router_agent_executor = AgentExecutor(
-        agent=router_agent,
-        tools=router_tools,
-        verbose=True,
-        memory=memory,
-        handle_parsing_errors=True
-    )
-
-    return router_agent_executor
+    # 路由Agent不需要工具，只是一个简单的LLM调用
+    # 我们直接使用LLM，不创建Agent Executor
+    # 但为了保持接口一致，我们创建一个简单的包装
+    
+    class SimpleRouterAgent:
+        def __init__(self, llm, prompt, memory):
+            self.llm = llm
+            self.prompt = prompt
+            self.memory = memory
+        
+        def invoke(self, inputs):
+            try:
+                # 获取对话历史（使用memory的load_memory_variables方法）
+                memory_variables = self.memory.load_memory_variables({})
+                chat_history = memory_variables.get("chat_history", [])
+                
+                # 构建消息
+                messages = self.prompt.format_messages(
+                    input=inputs["input"],
+                    chat_history=chat_history
+                )
+                
+                # 调用LLM
+                response = self.llm.invoke(messages)
+                output = response.content
+                
+                # 保存到memory
+                self.memory.save_context({"input": inputs["input"]}, {"output": output})
+                
+                return {"output": output}
+            except Exception as e:
+                # 如果format_messages失败，可能是prompt中有未转义的变量
+                # 尝试直接调用LLM，不使用prompt模板
+                error_msg = f"路由Agent错误: {str(e)}"
+                print(f"调试信息: {error_msg}")
+                # 直接使用简单的prompt
+                simple_prompt = f"根据用户输入判断应该使用哪个agent，输出JSON格式：{{\"tool\": \"route_to_data_collection\"或\"route_to_data_analysis\", \"user_input\": \"用户输入\"}}\n\n用户输入：{inputs['input']}"
+                response = self.llm.invoke(simple_prompt)
+                output = response.content
+                self.memory.save_context({"input": inputs["input"]}, {"output": output})
+                return {"output": output}
+    
+    router_agent = SimpleRouterAgent(llm, router_prompt, memory)
+    
+    return router_agent
 
 
 # ============================================================================
@@ -440,7 +505,7 @@ def create_router_agent(llm: ChatOpenAI, memory: ConversationBufferWindowMemory)
 
 def run_combined_agent():
     """运行整合后的agent系统"""
-    global GLOBAL_LLM, GLOBAL_DATA_COLLECTION_AGENT, GLOBAL_ANALYSIS_AGENT, GLOBAL_MEMORY
+    global GLOBAL_LLM, GLOBAL_DATA_COLLECTION_AGENT, GLOBAL_ANALYSIS_AGENT, GLOBAL_MEMORY, ROOT_PATH
 
     # 加载环境变量
     load_dotenv()
@@ -455,31 +520,19 @@ def run_combined_agent():
     )
     GLOBAL_LLM = llm
 
-    # 初始化内存（每个agent使用独立的内存）
-    collection_memory = ConversationBufferWindowMemory(
+    # 初始化共享内存（所有agent使用同一个内存，确保上下文共享）
+    shared_memory = ConversationBufferWindowMemory(
         memory_key="chat_history",
-        k=5,
+        k=10,  # 增加窗口大小以保存更多上下文
         return_messages=True
     )
+    GLOBAL_MEMORY = shared_memory
 
-    analysis_memory = ConversationBufferWindowMemory(
-        memory_key="chat_history",
-        k=5,
-        return_messages=True
-    )
-
-    router_memory = ConversationBufferWindowMemory(
-        memory_key="chat_history",
-        k=5,
-        return_messages=True
-    )
-    GLOBAL_MEMORY = router_memory
-
-    # 创建子agents
+    # 创建子agents（所有agent共享同一个memory）
     print("正在初始化agents...")
-    GLOBAL_DATA_COLLECTION_AGENT = create_data_collection_agent(llm, collection_memory)
-    GLOBAL_ANALYSIS_AGENT = create_analysis_agent(llm, analysis_memory)
-    router_agent = create_router_agent(llm, router_memory)
+    GLOBAL_DATA_COLLECTION_AGENT = create_data_collection_agent(llm, shared_memory)
+    GLOBAL_ANALYSIS_AGENT = create_analysis_agent(llm, shared_memory)
+    router_agent = create_router_agent(llm, shared_memory)
     print("Agents初始化完成！\n")
 
     print("=" * 60)
@@ -500,55 +553,109 @@ def run_combined_agent():
             result = router_agent.invoke({"input": user_input})
             router_output = result["output"]
 
-            # 处理数据收集agent的特殊输出格式
+            # 解析路由Agent的JSON输出
+            router_decision = None
             if router_output and isinstance(router_output, str):
-                # 检查是否是数据收集agent返回的JSON格式
-                if router_output.strip().startswith('{') and any(
-                        key in router_output for key in ["stock_code", "start_date"]):
+                # 尝试从输出中提取JSON（可能包含markdown代码块）
+                json_str = router_output.strip()
+                # 移除可能的markdown代码块标记
+                if json_str.startswith("```json"):
+                    json_str = json_str[7:]  # 移除 ```json
+                if json_str.startswith("```"):
+                    json_str = json_str[3:]   # 移除 ```
+                if json_str.endswith("```"):
+                    json_str = json_str[:-3]  # 移除结尾的```
+                json_str = json_str.strip()
+                
+                # 尝试解析JSON
+                if json_str.startswith('{'):
                     try:
-                        data = json.loads(router_output)
-
-                        if data.get('tool') == "collect_financial_data_pipeline":
-                            pending_confirmation_data = data
-                            formatted_json = json.dumps(data, indent=2, ensure_ascii=False)
-                            ai_response = (
-                                "我已成功提取您请求的参数，请确认：\n"
-                                f"{formatted_json}\n"
-                                "请回复 **'确认'** 或 **'否认'**。"
-                            )
-
-                        elif data.get('tool') == "execute_financial_data_collection":
-                            pending_confirmation_data = data
-                            params = data.get("parameters", data)
-                            stock_code = params.get("stock_code", "").split(".")[0]
-                            start_date = params.get("start_date")
-                            end_date = params.get("end_date")
-                            
-                            print(f"\n开始执行数据收集：股票代码={stock_code}, 起始年份={start_date}, 结束年份={end_date}")
-                            
-                            collector = UnifiedDataCollector(
-                                company_name=stock_code,
-                                stock_code=stock_code,
-                                start_date=start_date,
-                                end_date=end_date,
-                                exchange_type=None,
-                            )
-                            collector.run_all()
-
-                            ai_response = (
-                                f"已按以下信息爬取财报数据：\n"
-                                f"股票代码: {stock_code}\n"
-                                f"起始年份: {start_date}\n"
-                                f"结束年份: {end_date}\n"
-                                f"数据收集完成！现在可以询问任何关于此公司的信息。"
-                            )
-                        else:
-                            ai_response = router_output
+                        router_decision = json.loads(json_str)
                     except json.JSONDecodeError:
-                        ai_response = router_output
+                        pass
+
+            # 根据路由决策调用对应的子Agent
+            if router_decision and router_decision.get("tool"):
+                tool_name = router_decision.get("tool")
+                user_input_for_sub_agent = router_decision.get("user_input", user_input)
+                
+                if tool_name == "route_to_data_collection":
+                    # 调用数据收集Agent
+                    sub_result = GLOBAL_DATA_COLLECTION_AGENT.invoke({"input": user_input_for_sub_agent})
+                    sub_output = sub_result["output"]
+                    
+                    # 处理数据收集agent的特殊输出格式
+                    if sub_output and isinstance(sub_output, str):
+                        # 清理可能的markdown代码块标记
+                        json_str = sub_output.strip()
+                        if json_str.startswith("```json"):
+                            json_str = json_str[7:]  # 移除 ```json
+                        if json_str.startswith("```"):
+                            json_str = json_str[3:]   # 移除 ```
+                        if json_str.endswith("```"):
+                            json_str = json_str[:-3]  # 移除结尾的```
+                        json_str = json_str.strip()
+                        
+                        # 检查是否是参数确认的JSON格式
+                        if json_str.startswith('{') and any(
+                                key in json_str for key in ["stock_code", "start_date", "tool"]):
+                            try:
+                                data = json.loads(json_str)
+
+                                if data.get('tool') == "collect_financial_data_pipeline":
+                                    pending_confirmation_data = data
+                                    formatted_json = json.dumps(data, indent=2, ensure_ascii=False)
+                                    ai_response = (
+                                        "我已成功提取您请求的参数，请确认：\n"
+                                        f"{formatted_json}\n"
+                                        "请回复 **'确认'** 或 **'否认'**。"
+                                    )
+
+                                elif data.get('tool') == "execute_financial_data_collection":
+                                    pending_confirmation_data = data
+                                    params = data.get("parameters", data)
+                                    stock_code = params.get("stock_code", "").split(".")[0]
+                                    start_date = params.get("start_date")
+                                    end_date = params.get("end_date")
+                                    
+                                    print(f"\n开始执行数据收集：股票代码={stock_code}, 起始年份={start_date}, 结束年份={end_date}")
+                                    
+                                    collector = UnifiedDataCollector(
+                                        company_name=stock_code,
+                                        stock_code=stock_code,
+                                        start_date=start_date,
+                                        end_date=end_date,
+                                        exchange_type=None,
+                                    )
+                                    ROOT_PATH = collector.run_all()
+
+                                    ai_response = (
+                                        f"已按以下信息爬取财报数据：\n"
+                                        f"股票代码: {stock_code}\n"
+                                        f"起始年份: {start_date}\n"
+                                        f"结束年份: {end_date}\n"
+                                        f"储存地址: {ROOT_PATH}\n"
+                                        f"数据收集完成！现在可以询问任何关于此公司的信息。"
+                                    )
+                                else:
+                                    ai_response = sub_output
+                            except json.JSONDecodeError:
+                                ai_response = sub_output
+                        else:
+                            ai_response = sub_output
+                    else:
+                        ai_response = sub_output
+                        
+                elif tool_name == "route_to_data_analysis":
+                    # 调用数据分析Agent
+                    sub_result = GLOBAL_ANALYSIS_AGENT.invoke({"input": user_input_for_sub_agent})
+                    ai_response = sub_result["output"]
+                    
                 else:
+                    # tool为null或其他情况，直接返回路由Agent的输出
                     ai_response = router_output
             else:
+                # 路由Agent没有输出JSON或tool为null，直接返回路由Agent的输出
                 ai_response = router_output
 
             # 清理确认状态

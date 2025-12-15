@@ -706,6 +706,8 @@ class UnifiedDataCollector:
         print(f"  PDF提取: {'成功' if self.results['pdf_extracts']['success'] else '失败'}")
         print("=" * 80 + "\n")
 
+        return self.output_manager.get_root_dir()
+
 
 def check_duplicate_stock_code(code: str) -> list:
     """
@@ -963,7 +965,7 @@ def data_collection():
             exchange_type=input_data.get('exchange_type')
         )
         
-        collector.run_all()
+        root_path = collector.run_all()
         
     except KeyboardInterrupt:
         print("\n\n用户中断了收集过程")
