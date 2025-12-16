@@ -1,89 +1,197 @@
-# 财报数据收集与分析系统
+# 财务数据分析 Agent - 前后端应用
 
-## 概述
+这是一个基于 FastAPI 后端和 React 前端的财务数据分析系统。
 
-`main.py` 是一个基于 LangChain 的多 Agent 系统，用于自动收集和分析上市公司财报数据。系统采用三层架构：路由 Agent 负责意图识别，数据收集 Agent 负责数据爬取，数据分析 Agent 负责数据解读。
+## 环境要求
 
-## 核心功能
+- Python 3.8+
+- Node.js 16+
+- npm 或 yarn
 
-### 1. 数据收集
-- 支持通过公司名称或股票代码收集财报数据
-- 自动识别公司名称并转换为股票代码（如：安井食品 → 603345）
-- 支持指定年份范围的数据收集
-- 数据收集前会显示参数确认，用户确认后执行
+## 项目结构
 
-### 2. 数据分析
-- 基于已收集的财报数据进行分析
-- 支持自然语言提问（如："2024年营收是多少？"）
-- 自动读取最新收集的数据文件进行分析
+```
+.
+├── main.py                 # 原始的主程序（保持不变）
+├── api/                    # 后端 API 代码
+│   ├── main.py            # FastAPI 主应用
+│   ├── agent_service.py   # Agent 服务封装
+│   ├── streaming_handler.py  # Print 输出捕获
+│   └── models.py          # API 模型
+├── frontend/              # 前端代码
+│   ├── src/
+│   │   ├── pages/
+│   │   │   └── MainPage.tsx   # 主页面（合并了聊天和控制台）
+│   │   └── ...
+│   └── package.json
+├── requirements.txt       # Python 依赖
+└── .env                   # 环境变量（需要创建）
+```
 
-## 系统架构
+## 快速开始
 
-### 路由 Agent
-- **职责**：根据用户意图判断应该调用哪个子 Agent
-- **输出**：JSON 格式的路由决策 `{"tool": "route_to_data_collection/route_to_data_analysis", "user_input": "..."}`
-- **特点**：所有用户输入都经过路由 Agent 处理
+### 第一步：配置环境变量
 
-### 数据收集 Agent
-- **职责**：提取用户请求中的股票代码、年份等参数，执行数据收集
-- **工具**：
-  - `collect_financial_data_pipeline`：提取并确认参数
-  - `execute_financial_data_collection`：执行实际数据收集
-- **特点**：支持公司名称自动转股票代码
+在项目根目录创建 `.env` 文件，并添加以下内容：
 
-### 数据分析 Agent
-- **职责**：分析已收集的财报数据，回答用户问题
-- **工具**：
-  - `report_analysis_tool`：读取数据文件并分析
-  - `终止`：终止分析流程
-- **特点**：自动读取最新收集的数据文件
+```env
+OPENAI_API_KEY=your_api_key_here
+```
 
-## 技术特点
+### 第二步：后端
 
-- **共享 Memory**：所有 Agent 共享同一个对话历史，确保上下文传递
-- **自动路由**：根据用户意图自动选择对应的 Agent
-- **参数确认**：数据收集前会显示参数供用户确认
-- **动态路径**：数据分析 Agent 自动使用最新收集的数据文件路径
+**注意**：前端和后端需要在**两个不同的命令窗口**中运行。
 
-## 使用方法
-
-### 环境配置
-1. 安装依赖：`pip install -r requirements.txt`
-2. 配置环境变量：在 `.env` 文件中设置 `OPENAI_API_KEY`
-
-### 运行系统
+1. 在项目根目录打开第一个命令窗口（终端/命令行），执行：
 ```bash
-python main.py
+pip install -r requirements.txt
 ```
 
-### 使用示例
-
-**数据收集：**
-```
-你: 我想要安井食品2024年的财报
-AI: 我已成功提取您请求的参数，请确认：
-{
-  "tool": "collect_financial_data_pipeline",
-  "parameters": {
-    "stock_code": "603345",
-    "start_date": 2024-01-01,
-    "end_date": 2024-12-31
-  }
-}
-请回复 **'确认'** 或 **'否认'**。
-
-你: 确认
-AI: 已按以下信息爬取财报数据...
+2. 命令窗口**中（已在项目根目录），执行以下命令
+```bash
+python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-**数据分析：**
+后端启动后，你应该看到类似以下的输出：
 ```
-你: 2024年营收是多少？
-AI: [基于已收集的数据进行分析并回答]
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process
+INFO:     Started server process
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
 ```
 
-## 注意事项
+后端将在 `http://localhost:8000` 启动。
 
-- 数据收集需要一定时间，请耐心等待
-- 数据分析 Agent 会自动使用最新收集的数据文件
-- 输入 '退出' 或 'exit' 可结束对话
+### 第三步：前端
+
+**注意**：前端和后端需要在**两个不同的命令窗口**中运行。
+
+在项目根目录打开第二个命令窗口（终端/命令行），执行：
+
+```bash
+cd frontend
+npm install
+```
+
+在**第二个命令窗口**中，确保在 `frontend` 目录下，执行：
+
+```bash
+npm run dev
+```
+
+前端启动后，你应该看到类似以下的输出：
+```
+  VITE v5.x.x  ready in xxx ms
+
+  ➜  Local:   http://localhost:3000/
+  ➜  Network: use --host to expose
+```
+
+前端将在 `http://localhost:3000` 启动。
+
+### 第四步：访问应用
+
+在浏览器中打开 `http://localhost:3000`，你将看到：
+
+- **左侧**：聊天界面 - 输入你的问题，AI 会回复
+- **右侧**：命令行输出 - 实时显示所有 print 输出和 Agent 的思考过程
+
+## 使用说明
+
+### 聊天界面
+
+1. 在左侧输入框中输入你的问题
+2. 点击"发送"按钮或按 Enter 键
+3. AI 会处理你的请求并回复
+
+### 命令行输出
+
+右侧的命令行窗口会实时显示：
+- 用户输入
+- Agent 的思考过程
+- 工具调用信息
+- 所有的 print 输出
+- AI 的回复
+
+## 停止服务
+
+要停止服务，分别在两个命令窗口中按 `Ctrl+C`（Windows/Linux/Mac）。
+
+## 常见问题
+
+### 1. 端口被占用
+
+如果 8000 或 3000 端口被占用，可以修改：
+
+**后端端口**：修改 `api/main.py` 中的端口号，或使用：
+```bash
+python -m uvicorn api.main:app --host 0.0.0.0 --port 8001 --reload
+```
+
+**前端端口**：修改 `frontend/vite.config.ts` 中的 `port` 配置。
+
+### 2. 无法连接到后端
+
+- 确保后端在 8000 端口运行
+- 检查浏览器控制台（F12）是否有错误
+- 确认 `frontend/vite.config.ts` 中的代理配置正确
+
+### 3. 前端显示空白
+
+- 检查浏览器控制台是否有错误
+- 确认前端依赖已正确安装（`npm install`）
+- 尝试清除缓存：`npm run build` 然后 `npm run dev`
+
+### 4. WebSocket 连接失败
+
+- 确保后端正在运行
+- 检查防火墙设置
+- 查看后端控制台是否有错误信息
+
+### 5. API Key 错误
+
+- 检查 `.env` 文件是否存在
+- 确认 `OPENAI_API_KEY` 已正确设置
+- 确保 `.env` 文件在项目根目录
+
+## 开发
+
+### 后端开发
+
+后端代码在 `api/` 目录中。修改代码后，如果使用了 `--reload` 参数，后端会自动重新加载。
+
+### 前端开发
+
+前端代码在 `frontend/src/` 目录中。修改代码后，前端会自动热重载。
+
+### 构建生产版本
+
+**前端：**
+```bash
+cd frontend
+npm run build
+```
+
+构建后的文件在 `frontend/dist` 目录中。
+
+## API 端点
+
+### REST API
+
+- `GET /api/health` - 健康检查
+- `POST /api/chat` - 发送聊天消息
+
+### WebSocket
+
+- `ws://localhost:8000/ws/console` - 实时控制台输出流
+
+## 技术栈
+
+- **后端**：FastAPI, LangChain, OpenAI
+- **前端**：React, TypeScript, Vite
+- **通信**：REST API, WebSocket
+
+## 许可证
+
+[根据需要添加许可证信息]

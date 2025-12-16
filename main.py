@@ -134,7 +134,7 @@ class FinancialReportAnalysisTool(BaseTool):
         if root_path is None:
             return "系统配置错误：ROOT_PATH未设置，请先执行数据收集。"
 
-        actual_path = f"{root_path}/integrated_stock_news_data.csv"
+        actual_path = f"{root_path}/financial_statements.csv"
         try:
             with open(actual_path, 'r', encoding='utf-8') as f:
                 return f.read()

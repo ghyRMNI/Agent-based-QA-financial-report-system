@@ -622,32 +622,32 @@ class UnifiedDataCollector:
         existing_data = self.check_existing_data()
         skip_collection = False
         
-        if existing_data['exists'] and existing_data['has_news'] and existing_data['has_announcements']:
-            print("\n" + "=" * 80)
-            print("检测到已存在数据")
-            print("=" * 80)
-            print(f"公司: {self.company_name}")
-            print(f"输出目录: {self.output_manager.get_root_dir()}")
-            print(f"  ✓ 新闻数据已存在")
-            print(f"  ✓ 公告数据已存在")
-            print("=" * 80)
-            
-            # 询问用户是否跳过数据收集
-            user_choice = input("\n是否跳过数据收集，直接进行PDF分析？(y/n，默认y): ").strip().lower()
-            
-            if user_choice == '' or user_choice == 'y':
-                skip_collection = True
-                print("\n跳过数据收集步骤，直接进入PDF提取分析...\n")
-                
-                # 标记为成功（使用已有数据）
-                self.results['stock_data']['success'] = True
-                self.results['news_data']['success'] = True
-                self.results['announcements']['success'] = True
-                
-                # 直接进入PDF提取
-                self.extract_pdfs()
-            else:
-                print("\n将重新收集数据（已有数据将被覆盖）...\n")
+        # if existing_data['exists'] and existing_data['has_news'] and existing_data['has_announcements']:
+        #     print("\n" + "=" * 80)
+        #     print("检测到已存在数据")
+        #     print("=" * 80)
+        #     print(f"公司: {self.company_name}")
+        #     print(f"输出目录: {self.output_manager.get_root_dir()}")
+        #     print(f"  ✓ 新闻数据已存在")
+        #     print(f"  ✓ 公告数据已存在")
+        #     print("=" * 80)
+        #
+        #     # 询问用户是否跳过数据收集
+        #     user_choice = input("\n是否跳过数据收集，直接进行PDF分析？(y/n，默认y): ").strip().lower()
+        #
+        #     if user_choice == '' or user_choice == 'y':
+        #         skip_collection = True
+        #         print("\n跳过数据收集步骤，直接进入PDF提取分析...\n")
+        #
+        #         # 标记为成功（使用已有数据）
+        #         self.results['stock_data']['success'] = True
+        #         self.results['news_data']['success'] = True
+        #         self.results['announcements']['success'] = True
+        #
+        #         # 直接进入PDF提取
+        #         self.extract_pdfs()
+        #     else:
+        #         print("\n将重新收集数据（已有数据将被覆盖）...\n")
         
         if not skip_collection:
             # 执行各个收集任务
