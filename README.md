@@ -42,7 +42,12 @@ OPENAI_API_KEY=your_api_key_here
 
 **注意**：前端和后端需要在**两个不同的命令窗口**中运行。
 
-1. 在项目根目录打开第一个命令窗口（终端/命令行），执行：
+1. 进入虚拟环境
+```bash
+conda activate "environment_name"
+```
+
+2. 在项目根目录打开第一个命令窗口（终端/命令行），执行：
 ```bash
 pip install -r requirements.txt
 ```
